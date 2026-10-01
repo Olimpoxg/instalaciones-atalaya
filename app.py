@@ -97,7 +97,11 @@ if menu == "Nuevo Albarán":
     st.markdown("---")
     st.subheader("5. Firmas Digitales (Firma con el dedo)")
     
-    col_t, col_c = st.columns(2)
+    # Inicializar estado para limpiar los canvas si es necesario
+    if 'clear_canvas' not in st.session_state:
+        st.session_state.clear_canvas = False
+
+    col_t, col_btn_t = st.columns([3, 1])
     with col_t:
         st.text("Firma Técnico (Mikel)")
         canvas_tecnico = st_canvas(
@@ -105,11 +109,19 @@ if menu == "Nuevo Albarán":
             stroke_width=2,
             stroke_color="#000000",
             background_color="#FFFFFF",
-            height=140,
-            width=250,
+            height=130,
+            width=230,
             drawing_mode="freedraw",
             key="canvas_tec"
         )
+    with col_btn_t:
+        st.write("")
+        st.write("")
+        if st.button("Borrar Tec.", key="clr_tec"):
+            st.rerun()
+
+    st.markdown("")
+    col_c, col_btn_c = st.columns([3, 1])
     with col_c:
         st.text("Firma Titular / Cliente")
         canvas_cliente = st_canvas(
@@ -117,33 +129,45 @@ if menu == "Nuevo Albarán":
             stroke_width=2,
             stroke_color="#000000",
             background_color="#FFFFFF",
-            height=140,
-            width=250,
+            height=130,
+            width=230,
             drawing_mode="freedraw",
             key="canvas_cli"
         )
+    with col_btn_c:
+        st.write("")
+        st.write("")
+        if st.button("Borrar Cli.", key="clr_cli"):
+            st.rerun()
 
     st.markdown("---")
-    if st.button("💾 Guardar Albarán y Generar PDF", type="primary", use_container_width=True):
+    if st.button("💾 Guardar Albarán y Registrar", type="primary", use_container_width=True):
         if not nombre_local.strip():
             st.error("El nombre del local es obligatorio.")
         elif not st.session_state.equipos_temp:
             st.error("Debes añadir al menos un equipo a la lista.")
         else:
-            # Procesar firmas
+            # Procesar firma técnico de forma segura
             sig_tec_b64 = ""
-            if canvas_tecnico.image_data is not None:
-                img_tec = Image.fromarray(canvas_tecnico.image_data.astype('uint8'), 'RGBA')
-                buffered_tec = io.BytesIO()
-                img_tec.save(buffered_tec, format="PNG")
-                sig_tec_b64 = base64.b64encode(buffered_tec.getvalue()).decode()
+            try:
+                if canvas_tecnico and canvas_tecnico.image_data is not None:
+                    img_tec = Image.fromarray(canvas_tecnico.image_data.astype('uint8'), 'RGBA')
+                    buffered_tec = io.BytesIO()
+                    img_tec.save(buffered_tec, format="PNG")
+                    sig_tec_b64 = base64.b64encode(buffered_tec.getvalue()).decode()
+            except Exception:
+                pass
 
+            # Procesar firma cliente de forma segura
             sig_cli_b64 = ""
-            if canvas_cliente.image_data is not None:
-                img_cli = Image.fromarray(canvas_cliente.image_data.astype('uint8'), 'RGBA')
-                buffered_cli = io.BytesIO()
-                img_cli.save(buffered_cli, format="PNG")
-                sig_cli_b64 = base64.b64encode(buffered_cli.getvalue()).decode()
+            try:
+                if canvas_cliente and canvas_cliente.image_data is not None:
+                    img_cli = Image.fromarray(canvas_cliente.image_data.astype('uint8'), 'RGBA')
+                    buffered_cli = io.BytesIO()
+                    img_cli.save(buffered_cli, format="PNG")
+                    sig_cli_b64 = base64.b64encode(buffered_cli.getvalue()).decode()
+            except Exception:
+                pass
 
             # Guardar cabecera en Supabase
             albaran_data = {
