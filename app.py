@@ -1,4 +1,6 @@
 import streamlit as st
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from streamlit_drawable_canvas import st_canvas
@@ -87,7 +89,17 @@ def generar_pdf(alb, equipos):
     story.append(Paragraph("<b>CAFÉS ATALAYA</b>", style_title))
     story.append(Spacer(1, 4))
     story.append(Paragraph(f"<b>ALBARÁN #{alb['id']} - {alb['tipo_intervencion'].upper()}</b>", style_center))
-    story.append(Paragraph(f"Fecha: {alb['fecha'][:16]} | Tec: {alb['tecnico']}", style_center))
+    
+    # Mostrar fecha adaptada a hora local de España si viene de BD
+    fecha_str = alb['fecha']
+    try:
+        dt_utc = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
+        dt_es = dt_utc.astimezone(ZoneInfo("Europe/Madrid"))
+        fecha_fmt = dt_es.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        fecha_fmt = fecha_str[:16]
+
+    story.append(Paragraph(f"Fecha: {fecha_fmt} | Tec: {alb['tecnico']}", style_center))
     story.append(Spacer(1, 6))
 
     story.append(Paragraph(f"<b>Local:</b> {alb['nombre_local']}", style_bold))
@@ -111,7 +123,6 @@ def generar_pdf(alb, equipos):
     story.append(Paragraph("<i>La(s) máquina(s) son propiedad de Cafés Atalaya, en régimen de cesión exclusiva.</i>", style_center))
     story.append(Spacer(1, 8))
 
-    # Las firmas se dibujan a 280x160 -> mantener proporción (160 x ~91)
     for titulo, campo in [
         (f"FIRMA TÉCNICO ({alb['tecnico']}):", "firma_tecnico"),
         ("FIRMA CLIENTE:", "firma_cliente"),
@@ -152,7 +163,7 @@ if menu == "Nuevo Albarán":
     col1, col2 = st.columns(2)
     with col1:
         titular = st.text_input("Titular / Empresa")
-        cif = st.text_input("C.I.F. / D.N.I.")
+        cif = st.text_input("C.I.F. / D.N.I. Empresa")
         telefono = st.text_input("Teléfono")
     with col2:
         direccion = st.text_input("Dirección")
@@ -209,7 +220,13 @@ if menu == "Nuevo Albarán":
     nombre_tecnico = st.text_input("Nombre del Técnico", value="Mikel")
 
     st.markdown("---")
-    st.subheader("5. Firmas Digitales")
+    st.subheader("5. Datos del Firmante y Firmas Digitales")
+    
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        nombre_firmante_cliente = st.text_input("Nombre y Cargo del Firmante", placeholder="Ej: Juan (Camarero)")
+    with col_f2:
+        dni_firmante_cliente = st.text_input("D.N.I. del Firmante (Opcional)", placeholder="Ej: 12345678X")
 
     if "reset_tec" not in st.session_state:
         st.session_state.reset_tec = 0
@@ -236,7 +253,6 @@ if menu == "Nuevo Albarán":
         st.rerun()
 
     st.markdown("")
-    nombre_firmante_cliente = st.text_input("Nombre y Cargo de quien firma (Ej: Juan - Camarero / Encargado)")
 
     # --- Firma cliente ---
     st.text(f"Firma Cliente / Receptor: {nombre_firmante_cliente if nombre_firmante_cliente else 'Titular'}")
@@ -256,13 +272,12 @@ if menu == "Nuevo Albarán":
         st.rerun()
 
     if debug:
-        st.info("Depuración: lo que recibe Python de cada canvas")
+        st.info("Depuración de firmas:")
         for nombre, cv in [("Técnico", canvas_tecnico), ("Cliente", canvas_cliente)]:
             if cv.image_data is None:
-                st.write(f"**{nombre}**: image_data = None (el canvas no ha enviado nada)")
+                st.write(f"**{nombre}**: image_data = None")
             else:
-                st.write(f"**{nombre}**: forma {cv.image_data.shape}, ¿firma detectada? {bool(canvas_a_b64(cv))}")
-                st.image(cv.image_data, caption=f"Vista previa {nombre}", width=200)
+                st.write(f"**{nombre}**: forma {cv.image_data.shape}, ¿firma? {bool(canvas_a_b64(cv))}")
 
     st.markdown("---")
     if st.button("💾 Guardar Albarán", type="primary", use_container_width=True):
@@ -274,11 +289,20 @@ if menu == "Nuevo Albarán":
         elif not st.session_state.equipos_temp:
             st.error("Debes añadir al menos un equipo a la lista.")
         elif not sig_tec_b64:
-            st.error("No se ha detectado la firma del técnico. Actívala en 'Modo depuración' para ver qué recibe la app.")
+            st.error("No se ha detectado la firma del técnico.")
         elif not sig_cli_b64:
-            st.error("No se ha detectado la firma del cliente. Actívala en 'Modo depuración' para ver qué recibe la app.")
+            st.error("No se ha detectado la firma del cliente.")
         else:
+            # Obtener fecha y hora actual exacta en la España peninsular (Madrid)
+            ahora_madrid = datetime.now(ZoneInfo("Europe/Madrid")).isoformat()
+
+            # Construir la cadena descriptiva del titular con el firmante y el DNI si lo hay
+            info_firmante = nombre_firmante_cliente if nombre_firmante_cliente else "Titular"
+            if dni_firmante_cliente:
+                info_firmante += f" (DNI: {dni_firmante_cliente})"
+
             albaran_data = {
+                "fecha": ahora_madrid,
                 "tipo_intervencion": tipo_intervencion,
                 "nombre_local": nombre_local,
                 "cif": cif,
@@ -286,7 +310,7 @@ if menu == "Nuevo Albarán":
                 "localidad": localidad,
                 "cp": cp,
                 "telefono": telefono,
-                "titular": f"{titular} (Firmante: {nombre_firmante_cliente})" if nombre_firmante_cliente else titular,
+                "titular": f"{titular} | Firmante: {info_firmante}",
                 "observaciones": observaciones,
                 "tecnico": nombre_tecnico,
                 "firma_tecnico": sig_tec_b64,
@@ -311,7 +335,7 @@ if menu == "Nuevo Albarán":
                         "num_serie": eq["serie"],
                     }).execute()
 
-                st.success(f"¡Albarán #{albaran_id} guardado con éxito con sus firmas!")
+                st.success(f"¡Albarán #{albaran_id} guardado con éxito con sus firmas y hora peninsular!")
                 st.session_state.equipos_temp = []
                 st.session_state.reset_tec += 1
                 st.session_state.reset_cli += 1
@@ -335,7 +359,7 @@ elif menu == "Histórico / Reimprimir":
         else:
             for alb in albaranes:
                 with st.expander(f"Albarán #{alb['id']} - {alb['nombre_local']} ({alb['tipo_intervencion']} - {alb['fecha'][:10]})"):
-                    st.write(f"**Titular:** {alb['titular']} | **Tel:** {alb['telefono']}")
+                    st.write(f"**Titular / Firmante:** {alb['titular']} | **Tel:** {alb['telefono']}")
                     st.write(f"**Dirección:** {alb['direccion']}, {alb['localidad']}")
                     st.write(f"**Técnico:** {alb['tecnico']}")
 
@@ -349,11 +373,6 @@ elif menu == "Histórico / Reimprimir":
                     if alb.get("observaciones"):
                         st.write(f"**Observaciones:** {alb['observaciones']}")
 
-                    st.write(
-                        f"Firma técnico guardada: {'✅' if alb.get('firma_tecnico') else '❌'} | "
-                        f"Firma cliente guardada: {'✅' if alb.get('firma_cliente') else '❌'}"
-                    )
-
                     col_dl, col_del = st.columns(2)
                     pdf_key = f"pdf_bytes_{alb['id']}"
                     with col_dl:
@@ -362,7 +381,7 @@ elif menu == "Histórico / Reimprimir":
 
                         if pdf_key in st.session_state:
                             st.download_button(
-                                label=f"⬇️ Descargar Ticket #{alb['id']}",
+                                label=f"⬇️️ Descargar Ticket #{alb['id']}",
                                 data=st.session_state[pdf_key],
                                 file_name=f"Ticket_{alb['id']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
                                 mime="application/pdf",
