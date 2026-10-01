@@ -7,6 +7,7 @@ from streamlit_drawable_canvas import st_canvas
 from supabase import create_client, Client
 import io
 import base64
+import os
 import numpy as np
 from PIL import Image as PILImage
 
@@ -27,7 +28,12 @@ def init_supabase():
 
 supabase: Client = init_supabase()
 
-st.title("☕ Albaranes de Intervención")
+# Mostrar logo si existe en el repositorio de GitHub
+if os.path.exists("logo.png"):
+    st.image("logo.png", width=180)
+else:
+    st.title("☕ Albaranes de Intervención")
+
 st.caption("Cafés Atalaya / Servicios de Recreativos y Café, S.L.")
 
 menu = st.radio("Acción", ["Nuevo Albarán", "Histórico / Reimprimir"], horizontal=True, label_visibility="collapsed")
@@ -106,7 +112,7 @@ if menu == "Nuevo Albarán":
         st.text(f"Firma Técnico ({nombre_tecnico})")
         canvas_tecnico = st_canvas(
             fill_color="rgba(255, 255, 255, 1)",
-            stroke_width=2,
+            stroke_width=2.5,
             stroke_color="#000000",
             background_color="#FFFFFF",
             height=110,
@@ -129,7 +135,7 @@ if menu == "Nuevo Albarán":
         st.text("Firma Cliente / Receptor")
         canvas_cliente = st_canvas(
             fill_color="rgba(255, 255, 255, 1)",
-            stroke_width=2,
+            stroke_width=2.5,
             stroke_color="#000000",
             background_color="#FFFFFF",
             height=110,
@@ -151,31 +157,43 @@ if menu == "Nuevo Albarán":
         elif not st.session_state.equipos_temp:
             st.error("Debes añadir al menos un equipo a la lista.")
         else:
-            # Procesar firma técnico asegurando conversión correcta de array
+            # Captura ultra robusta de la firma del técnico
             sig_tec_b64 = ""
             try:
                 if canvas_tecnico.image_data is not None:
                     arr = canvas_tecnico.image_data
                     if isinstance(arr, np.ndarray) and arr.size > 0:
-                        img_tec = PILImage.fromarray(arr.astype('uint8'), 'RGBA')
+                        # Convertir asegurando formato RGB/RGBA limpio
+                        img_tec = PILImage.fromarray(arr.astype('uint8'))
+                        # Si tiene canal alpha transparente, poner fondo blanco
+                        if img_tec.mode in ('RGBA', 'LA'):
+                            background = PILImage.new("RGB", img_tec.size, (255, 255, 255))
+                            background.paste(img_tec, mask=img_tec.split()[3])
+                            img_tec = background
+                        
                         buffered_tec = io.BytesIO()
                         img_tec.save(buffered_tec, format="PNG")
                         sig_tec_b64 = base64.b64encode(buffered_tec.getvalue()).decode()
             except Exception as e:
-                print(f"Error procesando firma técnico: {e}")
+                print(f"Error firma técnico: {e}")
 
-            # Procesar firma cliente asegurando conversión correcta de array
+            # Captura ultra robusta de la firma del cliente
             sig_cli_b64 = ""
             try:
                 if canvas_cliente.image_data is not None:
                     arr_c = canvas_cliente.image_data
                     if isinstance(arr_c, np.ndarray) and arr_c.size > 0:
-                        img_cli = PILImage.fromarray(arr_c.astype('uint8'), 'RGBA')
+                        img_cli = PILImage.fromarray(arr_c.astype('uint8'))
+                        if img_cli.mode in ('RGBA', 'LA'):
+                            background = PILImage.new("RGB", img_cli.size, (255, 255, 255))
+                            background.paste(img_cli, mask=img_cli.split()[3])
+                            img_cli = background
+
                         buffered_cli = io.BytesIO()
                         img_cli.save(buffered_cli, format="PNG")
                         sig_cli_b64 = base64.b64encode(buffered_cli.getvalue()).decode()
             except Exception as e:
-                print(f"Error procesando firma cliente: {e}")
+                print(f"Error firma cliente: {e}")
 
             albaran_data = {
                 "tipo_intervencion": tipo_intervencion,
@@ -207,13 +225,13 @@ if menu == "Nuevo Albarán":
                     }
                     supabase.table("equipos_instalados").insert(eq_data).execute()
                 
-                st.success(f"¡Albarán #{albaran_id} guardado con éxito en Supabase!")
+                st.success(f"¡Albarán #{albaran_id} guardado con éxito en Supabase con sus firmas!")
                 st.session_state.equipos_temp = []
             else:
                 st.error("Error al guardar en la base de datos.")
 
 elif menu == "Histórico / Reimprimir":
-    st.subheader("📁 Histórico de Intervenciones y Reimpresión (Formato Ticket DPP-450)")
+    st.subheader("📁 Histórico de Intervenciones (Formato Ticket DPP-450)")
     try:
         response = supabase.table("albaranes_instalaciones").select("*").order("id", desc=True).limit(20).execute()
         albaranes = response.data
@@ -239,24 +257,29 @@ elif menu == "Histórico / Reimprimir":
                     
                     col_dl, col_del = st.columns(2)
                     with col_dl:
-                        # Generador de PDF en formato TICKET (Ancho optimizado DPP-450: ~72mm / 204 puntos)
                         if st.button(f"🖨️ Generar Ticket #{alb['id']}", key=f"pdf_{alb['id']}"):
-                            # Ancho de ticket térmico 80mm aprox 204 puntos, márgenes pequeños
                             buffer = io.BytesIO()
                             doc = SimpleDocTemplate(
                                 buffer, 
-                                pagesize=(210, 842), # Ancho exacto para impresoras térmicas portátiles tipo DPP-450
+                                pagesize=(210, 842), 
                                 rightMargin=10, leftMargin=10, topMargin=10, bottomMargin=10
                             )
                             story = []
                             
-                            # Estilos compactos para ticket
                             styles = getSampleStyleSheet()
                             style_center = ParagraphStyle('Center', parent=styles['Normal'], alignment=1, fontSize=8, leading=10)
                             style_bold = ParagraphStyle('Bold', parent=styles['Normal'], fontSize=7, leading=9, fontName='Helvetica-Bold')
                             style_normal = ParagraphStyle('NormalTicket', parent=styles['Normal'], fontSize=7, leading=9)
                             style_title = ParagraphStyle('TitleTicket', parent=styles['Normal'], alignment=1, fontSize=9, leading=11, fontName='Helvetica-Bold')
                             
+                            # Añadir logo en el PDF si existe localmente en el servidor
+                            if os.path.exists("logo.png"):
+                                try:
+                                    story.append(RLImage("logo.png", width=100, height=35))
+                                    story.append(Spacer(1, 4))
+                                except Exception:
+                                    pass
+
                             story.append(Paragraph("<b>SERVICIOS DE RECREATIVOS Y CAFÉ, S.L.</b>", style_title))
                             story.append(Paragraph("<b>CAFÉS ATALAYA</b>", style_title))
                             story.append(Spacer(1, 4))
@@ -285,25 +308,27 @@ elif menu == "Histórico / Reimprimir":
                             story.append(Paragraph("<i>La(s) máquina(s) son propiedad de Cafés Atalaya, en régimen de cesión exclusiva.</i>", style_center))
                             story.append(Spacer(1, 8))
                             
-                            # Firmas adaptadas a ancho de ticket térmico
+                            # Incrustar Firma Técnico
                             story.append(Paragraph("<b>FIRMA TÉCNICO:</b>", style_bold))
-                            if alb['firma_tecnico']:
+                            if alb.get('firma_tecnico'):
                                 try:
                                     img_t_bytes = base64.b64decode(alb['firma_tecnico'])
-                                    story.append(RLImage(io.BytesIO(img_t_bytes), width=160, height=60))
+                                    story.append(RLImage(io.BytesIO(img_t_bytes), width=150, height=55))
                                 except Exception:
-                                    story.append(Paragraph("[Error cargando firma]", style_normal))
+                                    story.append(Paragraph("[Sin firma válida]", style_normal))
                             else:
                                 story.append(Paragraph("Sin firma", style_normal))
                                 
                             story.append(Spacer(1, 6))
+                            
+                            # Incrustar Firma Cliente
                             story.append(Paragraph("<b>FIRMA CLIENTE:</b>", style_bold))
-                            if alb['firma_cliente']:
+                            if alb.get('firma_cliente'):
                                 try:
                                     img_c_bytes = base64.b64decode(alb['firma_cliente'])
-                                    story.append(RLImage(io.BytesIO(img_c_bytes), width=160, height=60))
+                                    story.append(RLImage(io.BytesIO(img_c_bytes), width=150, height=55))
                                 except Exception:
-                                    story.append(Paragraph("[Error cargando firma]", style_normal))
+                                    story.append(Paragraph("[Sin firma válida]", style_normal))
                             else:
                                 story.append(Paragraph("Sin firma", style_normal))
                                 
