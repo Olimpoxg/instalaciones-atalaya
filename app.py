@@ -1,14 +1,14 @@
 import streamlit as st
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from streamlit_drawable_canvas import st_canvas
 from supabase import create_client, Client
 import io
 import base64
-from PIL import Image
+from PIL import Image as PILImage
 
 # Configuración de la página optimizada para móvil
 st.set_page_config(
@@ -37,7 +37,7 @@ if menu == "Nuevo Albarán":
     nombre_local = st.text_input("Nombre del Local (Bar / Establecimiento)")
     col1, col2 = st.columns(2)
     with col1:
-        titular = st.text_input("Titular / Responsable")
+        titular = st.text_input("Titular / Empresa")
         cif = st.text_input("C.I.F. / D.N.I.")
         telefono = st.text_input("Teléfono")
     with col2:
@@ -91,85 +91,87 @@ if menu == "Nuevo Albarán":
                     st.rerun()
 
     st.markdown("---")
-    st.subheader("4. Observaciones")
+    st.subheader("4. Observaciones y Técnico")
     observaciones = st.text_area("Notas adicionales", placeholder="Ej: Máquina revisada, pendiente cambio de filtro...")
+    nombre_tecnico = st.text_input("Nombre del Técnico", value="Mikel")
 
     st.markdown("---")
-    st.subheader("5. Firmas Digitales (Firma con el dedo)")
+    st.subheader("5. Firmas Digitales")
     
-    # Inicializar estado para limpiar los canvas si es necesario
-    if 'clear_canvas' not in st.session_state:
-        st.session_state.clear_canvas = False
+    # Gestión de estado para limpiar canvas si se solicita
+    if 'reset_tec' not in st.session_state: st.session_state.reset_tec = 0
+    if 'reset_cli' not in st.session_state: st.session_state.reset_cli = 0
 
     col_t, col_btn_t = st.columns([3, 1])
     with col_t:
-        st.text("Firma Técnico (Mikel)")
+        st.text(f"Firma Técnico ({nombre_tecnico})")
         canvas_tecnico = st_canvas(
             fill_color="rgba(255, 255, 255, 0)",
             stroke_width=2,
             stroke_color="#000000",
             background_color="#FFFFFF",
-            height=130,
-            width=230,
+            height=120,
+            width=220,
             drawing_mode="freedraw",
-            key="canvas_tec"
+            key=f"canvas_tec_{st.session_state.reset_tec}"
         )
     with col_btn_t:
         st.write("")
         st.write("")
         if st.button("Borrar Tec.", key="clr_tec"):
+            st.session_state.reset_tec += 1
             st.rerun()
 
     st.markdown("")
+    nombre_firmante_cliente = st.text_input("Nombre y Cargo de quien firma (Ej: Juan - Camarero / Encargado)")
+    
     col_c, col_btn_c = st.columns([3, 1])
     with col_c:
-        st.text("Firma Titular / Cliente")
+        st.text("Firma Cliente / Receptor")
         canvas_cliente = st_canvas(
             fill_color="rgba(255, 255, 255, 0)",
             stroke_width=2,
             stroke_color="#000000",
             background_color="#FFFFFF",
-            height=130,
-            width=230,
+            height=120,
+            width=220,
             drawing_mode="freedraw",
-            key="canvas_cli"
+            key=f"canvas_cli_{st.session_state.reset_cli}"
         )
     with col_btn_c:
         st.write("")
         st.write("")
         if st.button("Borrar Cli.", key="clr_cli"):
+            st.session_state.reset_cli += 1
             st.rerun()
 
     st.markdown("---")
-    if st.button("💾 Guardar Albarán y Registrar", type="primary", use_container_width=True):
+    if st.button("💾 Guardar Albarán y Generar PDF", type="primary", use_container_width=True):
         if not nombre_local.strip():
             st.error("El nombre del local es obligatorio.")
         elif not st.session_state.equipos_temp:
             st.error("Debes añadir al menos un equipo a la lista.")
         else:
-            # Procesar firma técnico de forma segura
             sig_tec_b64 = ""
             try:
                 if canvas_tecnico and canvas_tecnico.image_data is not None:
-                    img_tec = Image.fromarray(canvas_tecnico.image_data.astype('uint8'), 'RGBA')
+                    img_tec = PILImage.fromarray(canvas_tecnico.image_data.astype('uint8'), 'RGBA')
                     buffered_tec = io.BytesIO()
                     img_tec.save(buffered_tec, format="PNG")
                     sig_tec_b64 = base64.b64encode(buffered_tec.getvalue()).decode()
             except Exception:
                 pass
 
-            # Procesar firma cliente de forma segura
             sig_cli_b64 = ""
             try:
                 if canvas_cliente and canvas_cliente.image_data is not None:
-                    img_cli = Image.fromarray(canvas_cliente.image_data.astype('uint8'), 'RGBA')
+                    img_cli = PILImage.fromarray(canvas_cliente.image_data.astype('uint8'), 'RGBA')
                     buffered_cli = io.BytesIO()
                     img_cli.save(buffered_cli, format="PNG")
                     sig_cli_b64 = base64.b64encode(buffered_cli.getvalue()).decode()
             except Exception:
                 pass
 
-            # Guardar cabecera en Supabase
             albaran_data = {
                 "tipo_intervencion": tipo_intervencion,
                 "nombre_local": nombre_local,
@@ -178,9 +180,9 @@ if menu == "Nuevo Albarán":
                 "localidad": localidad,
                 "cp": cp,
                 "telefono": telefono,
-                "titular": titular,
+                "titular": f"{titular} (Firma: {nombre_firmante_cliente})" if nombre_firmante_cliente else titular,
                 "observaciones": observaciones,
-                "tecnico": "Mikel",
+                "tecnico": nombre_tecnico,
                 "firma_tecnico": sig_tec_b64,
                 "firma_cliente": sig_cli_b64
             }
@@ -189,8 +191,6 @@ if menu == "Nuevo Albarán":
             
             if res.data:
                 albaran_id = res.data[0]["id"]
-                
-                # Guardar equipos asociados
                 for eq in st.session_state.equipos_temp:
                     eq_data = {
                         "albaranes_id": albaran_id,
@@ -208,7 +208,7 @@ if menu == "Nuevo Albarán":
                 st.error("Error al guardar en la base de datos.")
 
 elif menu == "Histórico / Reimprimir":
-    st.subheader("📁 Histórico de Intervenciones")
+    st.subheader("📁 Histórico de Intervenciones y Reimpresión")
     try:
         response = supabase.table("albaranes_instalaciones").select("*").order("id", desc=True).limit(20).execute()
         albaranes = response.data
@@ -218,8 +218,9 @@ elif menu == "Histórico / Reimprimir":
         else:
             for alb in albaranes:
                 with st.expander(f"Albarán #{alb['id']} - {alb['nombre_local']} ({alb['tipo_intervencion']} - {alb['fecha'][:10]})"):
-                    st.write(f"**Titular:** {alb['titular']} | **Teléfono:** {alb['telefono']}")
-                    st.write(f"**Dirección:** {alb['direccion']}, {alb['localidad']}")
+                    st.write(f"**Titular / Firmante:** {alb['titular']} | **Teléfono:** {alb['telefono']}")
+                    st.write(f"**Dirección:** {alb['direccion']}, {alb['localidad']} ({alb['cp']})")
+                    st.write(f"**Técnico:** {alb['tecnico']}")
                     
                     eq_res = supabase.table("equipos_instalados").select("*").eq("albaranes_id", alb['id']).execute()
                     equipos = eq_res.data
@@ -230,5 +231,96 @@ elif menu == "Histórico / Reimprimir":
                     
                     if alb['observaciones']:
                         st.write(f"**Observaciones:** {alb['observaciones']}")
+                    
+                    col_dl, col_del = st.columns(2)
+                    with col_dl:
+                        # Generador de PDF al vuelo para descargar/imprimir
+                        if st.button(f"📥 Generar PDF #{alb['id']}", key=f"pdf_{alb['id']}"):
+                            buffer = io.BytesIO()
+                            doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+                            story = []
+                            styles = getSampleStyleSheet()
+                            
+                            # Cabecera
+                            story.append(Paragraph("<b>SERVICIOS DE RECREATIVOS Y CAFÉ, S.L. / CAFÉS ATALAYA</b>", styles['Heading2']))
+                            story.append(Paragraph(f"<b>ALBARÁN DE INTERVENCIÓN #{alb['id']}</b> - Tipo: {alb['tipo_intervencion']}", styles['Normal']))
+                            story.append(Paragraph(f"Fecha: {alb['fecha'][:10]} | Técnico: {alb['tecnico']}", styles['Normal']))
+                            story.append(Spacer(1, 10))
+                            
+                            # Datos Cliente
+                            story.append(Paragraph(f"<b>Local:</b> {alb['nombre_local']} | <b>Titular:</b> {alb['titular']}", styles['Normal']))
+                            story.append(Paragraph(f"<b>Dirección:</b> {alb['direccion']}, {alb['localidad']} ({alb['cp']}) | <b>Tel:</b> {alb['telefono']}", styles['Normal']))
+                            story.append(Spacer(1, 10))
+                            
+                            # Tabla Equipos
+                            data_table = [["Acción", "Tipo", "Fabricante", "Modelo", "N/S"]]
+                            for e in equipos:
+                                data_table.append([e['accion'], e['tipo_equipo'], e['fabricante'] or '', e['modelo'] or '', e['num_serie'] or ''])
+                            
+                            t = Table(data_table, colWidths=[65, 75, 100, 110, 150])
+                            t.setStyle(TableStyle([
+                                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                                ('BOTTOMPADDING', (0,0), (-1,0), 6),
+                                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                            ]))
+                            story.append(t)
+                            story.append(Spacer(1, 10))
+                            
+                            if alb['observaciones']:
+                                story.append(Paragraph(f"<b>Observaciones:</b> {alb['observaciones']}", styles['Normal']))
+                                story.append(Spacer(1, 10))
+                                
+                            # Coletilla legal
+                            story.append(Paragraph("<i>La(s) máquina(s) detallada(s) son propiedad de SERVICIOS DE RECREATIVOS Y CAFÉ, S.L. / CAFÉS ATALAYA, quedando depositadas en calidad de cesión para su explotación exclusiva en el establecimiento indicado.</i>", styles['Italic']))
+                            story.append(Spacer(1, 15))
+                            
+                            # Firmas en PDF
+                            sig_data = [["Firma Técnico", "Firma Cliente"]]
+                            img_tec_flow = Paragraph("Sin firma", styles['Normal'])
+                            img_cli_flow = Paragraph("Sin firma", styles['Normal'])
+                            
+                            if alb['firma_tecnico']:
+                                try:
+                                    img_t_bytes = base64.b64decode(alb['firma_tecnico'])
+                                    img_tec_flow = RLImage(io.BytesIO(img_t_bytes), width=180, height=80)
+                                except Exception: pass
+                                
+                            if alb['firma_cliente']:
+                                try:
+                                    img_c_bytes = base64.b64decode(alb['firma_cliente'])
+                                    img_cli_flow = RLImage(io.BytesIO(img_c_bytes), width=180, height=80)
+                                except Exception: pass
+                                
+                            sig_data.append([img_tec_flow, img_cli_flow])
+                            t_sig = Table(sig_data, colWidths=[250, 250])
+                            t_sig.setStyle(TableStyle([
+                                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                                ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+                                ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                            ]))
+                            story.append(t_sig)
+                            
+                            doc.build(story)
+                            buffer.seek(0)
+                            
+                            st.download_button(
+                                label=f"📥 Descargar PDF Albarán #{alb['id']}",
+                                data=buffer,
+                                file_name=f"Albaran_{alb['id']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
+                                mime="application/pdf",
+                                key=f"dl_btn_{alb['id']}"
+                            )
+
+                    with col_del:
+                        # Botón para borrar del histórico
+                        if st.button(f"🗑️ Borrar #{alb['id']}", key=f"del_db_{alb['id']}"):
+                            supabase.table("equipos_instalados").delete().eq("albaranes_id", alb['id']).execute()
+                            supabase.table("albaranes_instalaciones").delete().eq("id", alb['id']).execute()
+                            st.success(f"Albarán #{alb['id']} borrado.")
+                            st.rerun()
+
     except Exception as e:
         st.error(f"Error al conectar con Supabase: {e}")
