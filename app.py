@@ -73,16 +73,16 @@ def generar_pdf(alb, equipos):
     story = []
 
     styles = getSampleStyleSheet()
-    # Tipografías y tamaños ligeramente aumentados para mejor lectura térmica
+    # Tamaños ampliados para aprovechar mejor el ancho del ticket térmico y facilitar lectura
     style_center = ParagraphStyle("Center", parent=styles["Normal"], alignment=1, fontSize=9, leading=12)
-    style_bold = ParagraphStyle("Bold", parent=styles["Normal"], fontSize=8, leading=11, fontName="Helvetica-Bold")
-    style_normal = ParagraphStyle("NormalTicket", parent=styles["Normal"], fontSize=8, leading=11)
+    style_bold = ParagraphStyle("Bold", parent=styles["Normal"], fontSize=9, leading=13, fontName="Helvetica-Bold")
+    style_normal = ParagraphStyle("NormalTicket", parent=styles["Normal"], fontSize=9, leading=13)
     style_title = ParagraphStyle("TitleTicket", parent=styles["Normal"], alignment=1, fontSize=10, leading=13, fontName="Helvetica-Bold")
-    style_header_tipo = ParagraphStyle("HeaderTipo", parent=styles["Normal"], alignment=1, fontSize=11, leading=14, fontName="Helvetica-Bold")
+    style_header_tipo = ParagraphStyle("HeaderTipo", parent=styles["Normal"], alignment=1, fontSize=12, leading=15, fontName="Helvetica-Bold")
 
     if os.path.exists("logo.png"):
         try:
-            story.append(RLImage("logo.png", width=110, height=40))
+            story.append(RLImage("logo.png", width=120, height=42))
             story.append(Spacer(1, 6))
         except Exception:
             pass
@@ -91,11 +91,11 @@ def generar_pdf(alb, equipos):
     story.append(Paragraph("<b>CAFÉS ATALAYA</b>", style_title))
     story.append(Spacer(1, 6))
     
-    # Título limpio sin número de albarán
+    # Título limpio del tipo de intervención
     story.append(Paragraph(f"<b>{alb['tipo_intervencion'].upper()}</b>", style_header_tipo))
     story.append(Spacer(1, 4))
     
-    # Formato de fecha español (DD/MM/YYYY HH:MM)
+    # Fecha en formato español (DD/MM/YYYY HH:MM) sin rastro del técnico arriba
     fecha_str = alb['fecha']
     try:
         dt_utc = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
@@ -104,7 +104,7 @@ def generar_pdf(alb, equipos):
     except Exception:
         fecha_fmt = fecha_str[:16]
 
-    story.append(Paragraph(f"Fecha: {fecha_fmt} | Tec: {alb['tecnico']}", style_center))
+    story.append(Paragraph(f"<b>Fecha:</b> {fecha_fmt}", style_center))
     story.append(Spacer(1, 8))
 
     story.append(Paragraph(f"<b>Local:</b> {alb['nombre_local']}", style_bold))
@@ -118,10 +118,10 @@ def generar_pdf(alb, equipos):
         story.append(Paragraph(f"• <b>{e['accion']}</b>: {e['tipo_equipo']}", style_bold))
         story.append(Paragraph(f"  {e['fabricante']} {e['modelo']}", style_normal))
         story.append(Paragraph(f"  N/S: <b>{e['num_serie']}</b>", style_normal))
-        story.append(Spacer(1, 4))
+        story.append(Spacer(1, 5))
 
     if alb.get("observaciones"):
-        story.append(Spacer(1, 6))
+        story.append(Spacer(1, 4))
         story.append(Paragraph(f"<b>Obs:</b> {alb['observaciones']}", style_normal))
 
     story.append(Spacer(1, 8))
@@ -133,23 +133,27 @@ def generar_pdf(alb, equipos):
     if alb.get("firma_tecnico"):
         try:
             img_bytes = base64.b64decode(alb["firma_tecnico"])
-            story.append(RLImage(io.BytesIO(img_bytes), width=160, height=91))
+            story.append(RLImage(io.BytesIO(img_bytes), width=170, height=95))
         except Exception:
             story.append(Paragraph("[Sin firma válida]", style_normal))
     else:
         story.append(Paragraph("Sin firma", style_normal))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 10))
 
-    # --- FIRMA CLIENTE (Con nombre y DNI integrado al lado) ---
-    firmante_info = alb.get("firmante_nombre", "Cliente")
-    if alb.get("firmante_dni"):
-        firmante_info += f" (DNI: {alb['firmante_dni']})"
+    # --- FIRMA CLIENTE (Con nombre y DNI desahogados en líneas claras) ---
+    nombre_f = alb.get('firmante_nombre', 'Titular')
+    dni_f = alb.get('firmante_dni', '')
+    
+    story.append(Paragraph("<b>FIRMA CLIENTE:</b>", style_bold))
+    story.append(Paragraph(f"Nombre: <b>{nombre_f}</b>", style_normal))
+    if dni_f:
+        story.append(Paragraph(f"DNI: <b>{dni_f}</b>", style_normal))
+    story.append(Spacer(1, 4))
 
-    story.append(Paragraph(f"<b>FIRMA CLIENTE ({firmante_info}):</b>", style_bold))
     if alb.get("firma_cliente"):
         try:
             img_bytes = base64.b64decode(alb["firma_cliente"])
-            story.append(RLImage(io.BytesIO(img_bytes), width=160, height=91))
+            story.append(RLImage(io.BytesIO(img_bytes), width=170, height=95))
         except Exception:
             story.append(Paragraph("[Sin firma válida]", style_normal))
     else:
@@ -401,7 +405,7 @@ elif menu == "Histórico / Reimprimir":
                     col_dl, col_del = st.columns(2)
                     pdf_key = f"pdf_bytes_{alb['id']}"
                     with col_dl:
-                        if st.button(f"🖨️ Generar Ticket #{alb['id']}", key=f"pdf_{alb['id']}"):
+                        if st.button(f"🖨️️ Generar Ticket #{alb['id']}", key=f"pdf_{alb['id']}"):
                             st.session_state[pdf_key] = generar_pdf(alb, equipos)
 
                         if pdf_key in st.session_state:
