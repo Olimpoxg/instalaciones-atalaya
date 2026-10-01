@@ -1,8 +1,10 @@
 import streamlit as st
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image as RLImage
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 from streamlit_drawable_canvas import st_canvas
 from supabase import create_client, Client
 import io
@@ -22,19 +24,16 @@ st.set_page_config(
 # SISTEMA DE AUTENTICACIÓN POR CONTRASEÑA
 # ==========================================
 def verificar_password():
-    """Devuelve True si el usuario ha introducido la clave correcta."""
     if "autenticado" not in st.session_state:
         st.session_state.autenticado = False
 
     if st.session_state.autenticado:
         return True
 
-    # Comprobar si la clave está configurada en los secrets
     if "APP_PASSWORD" not in st.secrets:
-        st.error("⚠️ Falta configurar 'APP_PASSWORD' en los Secrets de Streamlit Cloud.")
+        st.error("⚠️️ Falta configurar 'APP_PASSWORD' en los Secrets de Streamlit Cloud.")
         return False
 
-    # Pantalla de login
     if os.path.exists("logo.png"):
         try:
             st.image("logo.png", width=180)
@@ -54,12 +53,10 @@ def verificar_password():
             st.error("Contraseña incorrecta.")
     return False
 
-# Si no está autenticado, paramos la ejecución aquí
 if not verificar_password():
     st.stop()
 # ==========================================
 
-# Evita que la página haga scroll mientras se dibuja con el dedo
 st.markdown(
     """
     <style>
@@ -80,7 +77,6 @@ supabase: Client = init_supabase()
 
 
 def canvas_a_b64(canvas):
-    """Devuelve la firma como PNG en base64, o '' si no hay trazos."""
     if canvas is None or canvas.image_data is None:
         return ""
     arr = canvas.image_data
@@ -95,7 +91,6 @@ def canvas_a_b64(canvas):
     else:
         img = img.convert("RGB")
 
-    # Si todo es (casi) blanco, no hay firma
     if np.asarray(img).min() > 245:
         return ""
 
@@ -104,7 +99,10 @@ def canvas_a_b64(canvas):
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def generar_pdf(alb, equipos):
+# ----------------------------------------------------
+# 1. GENERADOR DE PDF TÉRMICO (Ancho DPP-450)
+# ----------------------------------------------------
+def generar_pdf_termico(alb, equipos):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -158,7 +156,6 @@ def generar_pdf(alb, equipos):
         story.append(Paragraph(f"  N/S: <b>{e['num_serie']}</b>", style_normal))
         story.append(Spacer(1, 5))
 
-    # --- OBSERVACIONES ---
     if alb.get("observaciones"):
         story.append(Spacer(1, 4))
         story.append(Paragraph("<b>OBSERVACIONES:</b>", style_bold))
@@ -168,7 +165,6 @@ def generar_pdf(alb, equipos):
     story.append(Paragraph("<i>La(s) máquina(s) son propiedad de Cafés Atalaya, en régimen de cesión exclusiva.</i>", style_center))
     story.append(Spacer(1, 10))
 
-    # --- FIRMA TÉCNICO ---
     story.append(Paragraph(f"<b>FIRMA TÉCNICO ({alb['tecnico']}):</b>", style_bold))
     if alb.get("firma_tecnico"):
         try:
@@ -180,10 +176,8 @@ def generar_pdf(alb, equipos):
         story.append(Paragraph("Sin firma", style_normal))
     story.append(Spacer(1, 10))
 
-    # --- FIRMA CLIENTE ---
     nombre_f = alb.get('firmante_nombre', 'Titular')
     dni_f = alb.get('firmante_dni', '')
-    
     label_cliente = f"FIRMA CLIENTE ({nombre_f}"
     if dni_f:
         label_cliente += f" - DNI: {dni_f}"
@@ -198,13 +192,132 @@ def generar_pdf(alb, equipos):
             story.append(Paragraph("[Sin firma válida]", style_normal))
     else:
         story.append(Paragraph("Sin firma", style_normal))
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+# ----------------------------------------------------
+# 2. GENERADOR DE PDF OFICIAL EN FORMATO A4 (Oficina / Mail)
+# ----------------------------------------------------
+def generar_pdf_a4(alb, equipos):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40,
+    )
+    story = []
+
+    styles = getSampleStyleSheet()
+    style_title = ParagraphStyle("A4Title", parent=styles["Normal"], alignment=1, fontSize=15, leading=18, fontName="Helvetica-Bold")
+    style_subtitle = ParagraphStyle("A4Sub", parent=styles["Normal"], alignment=1, fontSize=10, leading=14, fontName="Helvetica-Bold")
+    style_normal = ParagraphStyle("A4Normal", parent=styles["Normal"], fontSize=9, leading=13)
+    style_bold = ParagraphStyle("A4Bold", parent=styles["Normal"], fontSize=9, leading=13, fontName="Helvetica-Bold")
+
+    if os.path.exists("logo.png"):
+        try:
+            story.append(RLImage("logo.png", width=130, height=45))
+            story.append(Spacer(1, 8))
+        except Exception:
+            pass
+
+    story.append(Paragraph("<b>SERVICIOS DE RECREATIVOS Y CAFÉ, S.L. / CAFÉS ATALAYA</b>", style_subtitle))
     story.append(Spacer(1, 6))
+    story.append(Paragraph(f"<b>ALBARÁN DE INTERVENCIÓN — {alb['tipo_intervencion'].upper()}</b>", style_title))
+    story.append(Spacer(1, 12))
+
+    fecha_str = alb['fecha']
+    try:
+        dt_utc = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
+        dt_es = dt_utc.astimezone(ZoneInfo("Europe/Madrid"))
+        fecha_fmt = dt_es.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        fecha_fmt = fecha_str[:16]
+
+    data_cabecera = [
+        [Paragraph(f"<b>Local:</b> {alb['nombre_local']}", style_normal), Paragraph(f"<b>Fecha:</b> {fecha_fmt}", style_normal)],
+        [Paragraph(f"<b>Titular:</b> {alb['titular']}", style_normal), Paragraph(f"<b>Técnico:</b> {alb['tecnico']}", style_normal)],
+        [Paragraph(f"<b>Dirección:</b> {alb['direccion']}, {alb['localidad']} ({alb['cp']})", style_normal), Paragraph(f"<b>Teléfono:</b> {alb['telefono']}", style_normal)]
+    ]
+    t_cabecera = Table(data_cabecera, colWidths=[270, 260])
+    t_cabecera.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(t_cabecera)
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("<b>EQUIPOS AFECTADOS</b>", style_bold))
+    story.append(Spacer(1, 4))
+    
+    data_equipos = [["Acción", "Tipo", "Fabricante", "Modelo", "N/S"]]
+    for e in equipos:
+        data_equipos.append([e['accion'], e['tipo_equipo'], e['fabricante'] or '', e['modelo'] or '', e['num_serie'] or ''])
+    
+    t_eq = Table(data_equipos, colWidths=[70, 80, 115, 115, 150])
+    t_eq.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+        ('FONTSIZE', (0,0), (-1,-1), 9),
+    ]))
+    story.append(t_eq)
+    story.append(Spacer(1, 10))
+
+    if alb.get("observaciones"):
+        story.append(Paragraph("<b>OBSERVACIONES:</b>", style_bold))
+        story.append(Paragraph(alb['observaciones'], style_normal))
+        story.append(Spacer(1, 10))
+
+    story.append(Paragraph("<i>La(s) máquina(s) detallada(s) son propiedad de Servicios de Recreativos y Café, S.L. / Cafés Atalaya, quedando depositadas en calidad de cesión para su explotación exclusiva en el establecimiento indicado.</i>", style_normal))
+    story.append(Spacer(1, 15))
+
+    img_tec_flow = Paragraph("Sin firma", style_normal)
+    img_cli_flow = Paragraph("Sin firma", style_normal)
+
+    if alb.get("firma_tecnico"):
+        try:
+            img_t_bytes = base64.b64decode(alb["firma_tecnico"])
+            img_tec_flow = RLImage(io.BytesIO(img_t_bytes), width=160, height=75)
+        except Exception: pass
+
+    if alb.get("firma_cliente"):
+        try:
+            img_c_bytes = base64.b64decode(alb["firma_cliente"])
+            img_cli_flow = RLImage(io.BytesIO(img_c_bytes), width=160, height=75)
+        except Exception: pass
+
+    nombre_f = alb.get('firmante_nombre', 'Titular')
+    dni_f = alb.get('firmante_dni', '')
+    txt_cliente = f"Firma Cliente ({nombre_f}"
+    if dni_f:
+        txt_cliente += f" - DNI: {dni_f}"
+    txt_cliente += ")"
+
+    sig_data = [
+        [Paragraph(f"<b>Firma Técnico ({alb['tecnico']})</b>", style_bold), Paragraph(f"<b>{txt_cliente}</b>", style_bold)],
+        [img_tec_flow, img_cli_flow]
+    ]
+    t_sig = Table(sig_data, colWidths=[265, 265])
+    t_sig.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+    ]))
+    story.append(t_sig)
 
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
 
+# ----------------------------------------------------
+# INTERFAZ DE USUARIO
+# ----------------------------------------------------
 if os.path.exists("logo.png"):
     st.image("logo.png", width=180)
 else:
@@ -291,7 +404,6 @@ if menu == "Nuevo Albarán":
 
     debug = st.checkbox("🔧 Modo depuración de firmas")
 
-    # --- Firma técnico ---
     st.text(f"Firma Técnico: {nombre_tecnico}")
     canvas_tecnico = st_canvas(
         fill_color="rgba(255, 255, 255, 1)",
@@ -310,7 +422,6 @@ if menu == "Nuevo Albarán":
 
     st.markdown("")
 
-    # --- Firma cliente ---
     st.text(f"Firma Cliente / Receptor: {nombre_firmante_cliente if nombre_firmante_cliente else 'Titular'}")
     canvas_cliente = st_canvas(
         fill_color="rgba(255, 255, 255, 1)",
@@ -406,7 +517,7 @@ if menu == "Nuevo Albarán":
                 st.error("Error al guardar en la base de datos (sin datos devueltos).")
 
 elif menu == "Histórico / Reimprimir":
-    st.subheader("📁 Histórico de Intervenciones (Formato Ticket DPP-450)")
+    st.subheader("📁 Histórico y Generación de Documentos")
     try:
         response = (
             supabase.table("albaranes_instalaciones")
@@ -440,27 +551,45 @@ elif menu == "Histórico / Reimprimir":
                     if alb.get("observaciones"):
                         st.write(f"**Observaciones:** {alb['observaciones']}")
 
-                    col_dl, col_del = st.columns(2)
-                    pdf_key = f"pdf_bytes_{alb['id']}"
-                    with col_dl:
-                        if st.button(f"🖨️ Generar Ticket #{alb['id']}", key=f"pdf_{alb['id']}"):
-                            st.session_state[pdf_key] = generar_pdf(alb, equipos)
+                    st.markdown("---")
+                    
+                    col_term, col_a4, col_del = st.columns(3)
+                    
+                    pdf_termico_key = f"termico_{alb['id']}"
+                    pdf_a4_key = f"a4_{alb['id']}"
 
-                        if pdf_key in st.session_state:
+                    with col_term:
+                        if st.button(f"🖨️ Ticket Térmico", key=f"btn_t_{alb['id']}"):
+                            st.session_state[pdf_termico_key] = generar_pdf_termico(alb, equipos)
+                        if pdf_termico_key in st.session_state:
                             st.download_button(
-                                label=f"⬇ Descargar Ticket #{alb['id']}",
-                                data=st.session_state[pdf_key],
+                                label=f"⬇ Descargar Térmico",
+                                data=st.session_state[pdf_termico_key],
                                 file_name=f"Ticket_{alb['tipo_intervencion']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
                                 mime="application/pdf",
-                                key=f"dl_btn_{alb['id']}",
+                                key=f"dl_t_{alb['id']}",
+                            )
+
+                    with col_a4:
+                        if st.button(f"📄 PDF Oficial A4", key=f"btn_a_{alb['id']}"):
+                            st.session_state[pdf_a4_key] = generar_pdf_a4(alb, equipos)
+                        if pdf_a4_key in st.session_state:
+                            st.download_button(
+                                label=f"⬇ Descargar A4 / Mail",
+                                data=st.session_state[pdf_a4_key],
+                                file_name=f"Albaran_{alb['tipo_intervencion']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
+                                mime="application/pdf",
+                                key=f"dl_a_{alb['id']}",
                             )
 
                     with col_del:
-                        if st.button(f"🗑️️ Borrar #{alb['id']}", key=f"del_db_{alb['id']}"):
+                        st.write("")
+                        if st.button(f"🗑️ Borrar", key=f"del_db_{alb['id']}"):
                             supabase.table("equipos_instalados").delete().eq("albaranes_id", alb["id"]).execute()
                             supabase.table("albaranes_instalaciones").delete().eq("id", alb["id"]).execute()
-                            st.session_state.pop(pdf_key, None)
-                            st.success("Albarán borrado.")
+                            st.session_state.pop(pdf_termico_key, None)
+                            st.session_state.pop(pdf_a4_key, None)
+                            st.success("Borrado.")
                             st.rerun()
 
     except Exception as e:
