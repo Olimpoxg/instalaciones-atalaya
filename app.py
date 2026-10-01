@@ -1,13 +1,13 @@
 import streamlit as st
 from datetime import datetime
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, Image as RLImage
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from streamlit_drawable_canvas import st_canvas
 from supabase import create_client, Client
 import io
 import base64
+import numpy as np
 from PIL import Image as PILImage
 
 # Configuración de la página optimizada para móvil
@@ -98,7 +98,6 @@ if menu == "Nuevo Albarán":
     st.markdown("---")
     st.subheader("5. Firmas Digitales")
     
-    # Gestión de estado para limpiar canvas si se solicita
     if 'reset_tec' not in st.session_state: st.session_state.reset_tec = 0
     if 'reset_cli' not in st.session_state: st.session_state.reset_cli = 0
 
@@ -106,12 +105,12 @@ if menu == "Nuevo Albarán":
     with col_t:
         st.text(f"Firma Técnico ({nombre_tecnico})")
         canvas_tecnico = st_canvas(
-            fill_color="rgba(255, 255, 255, 0)",
+            fill_color="rgba(255, 255, 255, 1)",
             stroke_width=2,
             stroke_color="#000000",
             background_color="#FFFFFF",
-            height=120,
-            width=220,
+            height=110,
+            width=200,
             drawing_mode="freedraw",
             key=f"canvas_tec_{st.session_state.reset_tec}"
         )
@@ -129,12 +128,12 @@ if menu == "Nuevo Albarán":
     with col_c:
         st.text("Firma Cliente / Receptor")
         canvas_cliente = st_canvas(
-            fill_color="rgba(255, 255, 255, 0)",
+            fill_color="rgba(255, 255, 255, 1)",
             stroke_width=2,
             stroke_color="#000000",
             background_color="#FFFFFF",
-            height=120,
-            width=220,
+            height=110,
+            width=200,
             drawing_mode="freedraw",
             key=f"canvas_cli_{st.session_state.reset_cli}"
         )
@@ -146,31 +145,37 @@ if menu == "Nuevo Albarán":
             st.rerun()
 
     st.markdown("---")
-    if st.button("💾 Guardar Albarán y Generar PDF", type="primary", use_container_width=True):
+    if st.button("💾 Guardar Albarán", type="primary", use_container_width=True):
         if not nombre_local.strip():
             st.error("El nombre del local es obligatorio.")
         elif not st.session_state.equipos_temp:
             st.error("Debes añadir al menos un equipo a la lista.")
         else:
+            # Procesar firma técnico asegurando conversión correcta de array
             sig_tec_b64 = ""
             try:
-                if canvas_tecnico and canvas_tecnico.image_data is not None:
-                    img_tec = PILImage.fromarray(canvas_tecnico.image_data.astype('uint8'), 'RGBA')
-                    buffered_tec = io.BytesIO()
-                    img_tec.save(buffered_tec, format="PNG")
-                    sig_tec_b64 = base64.b64encode(buffered_tec.getvalue()).decode()
-            except Exception:
-                pass
+                if canvas_tecnico.image_data is not None:
+                    arr = canvas_tecnico.image_data
+                    if isinstance(arr, np.ndarray) and arr.size > 0:
+                        img_tec = PILImage.fromarray(arr.astype('uint8'), 'RGBA')
+                        buffered_tec = io.BytesIO()
+                        img_tec.save(buffered_tec, format="PNG")
+                        sig_tec_b64 = base64.b64encode(buffered_tec.getvalue()).decode()
+            except Exception as e:
+                print(f"Error procesando firma técnico: {e}")
 
+            # Procesar firma cliente asegurando conversión correcta de array
             sig_cli_b64 = ""
             try:
-                if canvas_cliente and canvas_cliente.image_data is not None:
-                    img_cli = PILImage.fromarray(canvas_cliente.image_data.astype('uint8'), 'RGBA')
-                    buffered_cli = io.BytesIO()
-                    img_cli.save(buffered_cli, format="PNG")
-                    sig_cli_b64 = base64.b64encode(buffered_cli.getvalue()).decode()
-            except Exception:
-                pass
+                if canvas_cliente.image_data is not None:
+                    arr_c = canvas_cliente.image_data
+                    if isinstance(arr_c, np.ndarray) and arr_c.size > 0:
+                        img_cli = PILImage.fromarray(arr_c.astype('uint8'), 'RGBA')
+                        buffered_cli = io.BytesIO()
+                        img_cli.save(buffered_cli, format="PNG")
+                        sig_cli_b64 = base64.b64encode(buffered_cli.getvalue()).decode()
+            except Exception as e:
+                print(f"Error procesando firma cliente: {e}")
 
             albaran_data = {
                 "tipo_intervencion": tipo_intervencion,
@@ -180,7 +185,7 @@ if menu == "Nuevo Albarán":
                 "localidad": localidad,
                 "cp": cp,
                 "telefono": telefono,
-                "titular": f"{titular} (Firma: {nombre_firmante_cliente})" if nombre_firmante_cliente else titular,
+                "titular": f"{titular} (Firmante: {nombre_firmante_cliente})" if nombre_firmante_cliente else titular,
                 "observaciones": observaciones,
                 "tecnico": nombre_tecnico,
                 "firma_tecnico": sig_tec_b64,
@@ -208,7 +213,7 @@ if menu == "Nuevo Albarán":
                 st.error("Error al guardar en la base de datos.")
 
 elif menu == "Histórico / Reimprimir":
-    st.subheader("📁 Histórico de Intervenciones y Reimpresión")
+    st.subheader("📁 Histórico de Intervenciones y Reimpresión (Formato Ticket DPP-450)")
     try:
         response = supabase.table("albaranes_instalaciones").select("*").order("id", desc=True).limit(20).execute()
         albaranes = response.data
@@ -218,8 +223,8 @@ elif menu == "Histórico / Reimprimir":
         else:
             for alb in albaranes:
                 with st.expander(f"Albarán #{alb['id']} - {alb['nombre_local']} ({alb['tipo_intervencion']} - {alb['fecha'][:10]})"):
-                    st.write(f"**Titular / Firmante:** {alb['titular']} | **Teléfono:** {alb['telefono']}")
-                    st.write(f"**Dirección:** {alb['direccion']}, {alb['localidad']} ({alb['cp']})")
+                    st.write(f"**Titular:** {alb['titular']} | **Tel:** {alb['telefono']}")
+                    st.write(f"**Dirección:** {alb['direccion']}, {alb['localidad']}")
                     st.write(f"**Técnico:** {alb['tecnico']}")
                     
                     eq_res = supabase.table("equipos_instalados").select("*").eq("albaranes_id", alb['id']).execute()
@@ -234,88 +239,86 @@ elif menu == "Histórico / Reimprimir":
                     
                     col_dl, col_del = st.columns(2)
                     with col_dl:
-                        # Generador de PDF al vuelo para descargar/imprimir
-                        if st.button(f"📥 Generar PDF #{alb['id']}", key=f"pdf_{alb['id']}"):
+                        # Generador de PDF en formato TICKET (Ancho optimizado DPP-450: ~72mm / 204 puntos)
+                        if st.button(f"🖨️ Generar Ticket #{alb['id']}", key=f"pdf_{alb['id']}"):
+                            # Ancho de ticket térmico 80mm aprox 204 puntos, márgenes pequeños
                             buffer = io.BytesIO()
-                            doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+                            doc = SimpleDocTemplate(
+                                buffer, 
+                                pagesize=(210, 842), # Ancho exacto para impresoras térmicas portátiles tipo DPP-450
+                                rightMargin=10, leftMargin=10, topMargin=10, bottomMargin=10
+                            )
                             story = []
+                            
+                            # Estilos compactos para ticket
                             styles = getSampleStyleSheet()
+                            style_center = ParagraphStyle('Center', parent=styles['Normal'], alignment=1, fontSize=8, leading=10)
+                            style_bold = ParagraphStyle('Bold', parent=styles['Normal'], fontSize=7, leading=9, fontName='Helvetica-Bold')
+                            style_normal = ParagraphStyle('NormalTicket', parent=styles['Normal'], fontSize=7, leading=9)
+                            style_title = ParagraphStyle('TitleTicket', parent=styles['Normal'], alignment=1, fontSize=9, leading=11, fontName='Helvetica-Bold')
                             
-                            # Cabecera
-                            story.append(Paragraph("<b>SERVICIOS DE RECREATIVOS Y CAFÉ, S.L. / CAFÉS ATALAYA</b>", styles['Heading2']))
-                            story.append(Paragraph(f"<b>ALBARÁN DE INTERVENCIÓN #{alb['id']}</b> - Tipo: {alb['tipo_intervencion']}", styles['Normal']))
-                            story.append(Paragraph(f"Fecha: {alb['fecha'][:10]} | Técnico: {alb['tecnico']}", styles['Normal']))
-                            story.append(Spacer(1, 10))
+                            story.append(Paragraph("<b>SERVICIOS DE RECREATIVOS Y CAFÉ, S.L.</b>", style_title))
+                            story.append(Paragraph("<b>CAFÉS ATALAYA</b>", style_title))
+                            story.append(Spacer(1, 4))
+                            story.append(Paragraph(f"<b>ALBARÁN #{alb['id']} - {alb['tipo_intervencion'].upper()}</b>", style_center))
+                            story.append(Paragraph(f"Fecha: {alb['fecha'][:16]} | Tec: {alb['tecnico']}", style_center))
+                            story.append(Spacer(1, 6))
                             
-                            # Datos Cliente
-                            story.append(Paragraph(f"<b>Local:</b> {alb['nombre_local']} | <b>Titular:</b> {alb['titular']}", styles['Normal']))
-                            story.append(Paragraph(f"<b>Dirección:</b> {alb['direccion']}, {alb['localidad']} ({alb['cp']}) | <b>Tel:</b> {alb['telefono']}", styles['Normal']))
-                            story.append(Spacer(1, 10))
+                            story.append(Paragraph(f"<b>Local:</b> {alb['nombre_local']}", style_bold))
+                            story.append(Paragraph(f"<b>Titular:</b> {alb['titular']}", style_normal))
+                            story.append(Paragraph(f"<b>Dir:</b> {alb['direccion']}, {alb['localidad']}", style_normal))
+                            story.append(Paragraph(f"<b>Tel:</b> {alb['telefono']}", style_normal))
+                            story.append(Spacer(1, 6))
                             
-                            # Tabla Equipos
-                            data_table = [["Acción", "Tipo", "Fabricante", "Modelo", "N/S"]]
+                            story.append(Paragraph("<b>EQUIPOS AFECTADOS:</b>", style_bold))
                             for e in equipos:
-                                data_table.append([e['accion'], e['tipo_equipo'], e['fabricante'] or '', e['modelo'] or '', e['num_serie'] or ''])
-                            
-                            t = Table(data_table, colWidths=[65, 75, 100, 110, 150])
-                            t.setStyle(TableStyle([
-                                ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-                                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                                ('BOTTOMPADDING', (0,0), (-1,0), 6),
-                                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                            ]))
-                            story.append(t)
-                            story.append(Spacer(1, 10))
-                            
-                            if alb['observaciones']:
-                                story.append(Paragraph(f"<b>Observaciones:</b> {alb['observaciones']}", styles['Normal']))
-                                story.append(Spacer(1, 10))
+                                story.append(Paragraph(f"• <b>{e['accion']}</b>: {e['tipo_equipo']}", style_bold))
+                                story.append(Paragraph(f"  {e['fabricante']} {e['modelo']}", style_normal))
+                                story.append(Paragraph(f"  N/S: <b>{e['num_serie']}</b>", style_normal))
+                                story.append(Spacer(1, 2))
                                 
-                            # Coletilla legal
-                            story.append(Paragraph("<i>La(s) máquina(s) detallada(s) son propiedad de SERVICIOS DE RECREATIVOS Y CAFÉ, S.L. / CAFÉS ATALAYA, quedando depositadas en calidad de cesión para su explotación exclusiva en el establecimiento indicado.</i>", styles['Italic']))
-                            story.append(Spacer(1, 15))
+                            if alb['observaciones']:
+                                story.append(Spacer(1, 4))
+                                story.append(Paragraph(f"<b>Obs:</b> {alb['observaciones']}", style_normal))
+                                
+                            story.append(Spacer(1, 6))
+                            story.append(Paragraph("<i>La(s) máquina(s) son propiedad de Cafés Atalaya, en régimen de cesión exclusiva.</i>", style_center))
+                            story.append(Spacer(1, 8))
                             
-                            # Firmas en PDF
-                            sig_data = [["Firma Técnico", "Firma Cliente"]]
-                            img_tec_flow = Paragraph("Sin firma", styles['Normal'])
-                            img_cli_flow = Paragraph("Sin firma", styles['Normal'])
-                            
+                            # Firmas adaptadas a ancho de ticket térmico
+                            story.append(Paragraph("<b>FIRMA TÉCNICO:</b>", style_bold))
                             if alb['firma_tecnico']:
                                 try:
                                     img_t_bytes = base64.b64decode(alb['firma_tecnico'])
-                                    img_tec_flow = RLImage(io.BytesIO(img_t_bytes), width=180, height=80)
-                                except Exception: pass
+                                    story.append(RLImage(io.BytesIO(img_t_bytes), width=160, height=60))
+                                except Exception:
+                                    story.append(Paragraph("[Error cargando firma]", style_normal))
+                            else:
+                                story.append(Paragraph("Sin firma", style_normal))
                                 
+                            story.append(Spacer(1, 6))
+                            story.append(Paragraph("<b>FIRMA CLIENTE:</b>", style_bold))
                             if alb['firma_cliente']:
                                 try:
                                     img_c_bytes = base64.b64decode(alb['firma_cliente'])
-                                    img_cli_flow = RLImage(io.BytesIO(img_c_bytes), width=180, height=80)
-                                except Exception: pass
+                                    story.append(RLImage(io.BytesIO(img_c_bytes), width=160, height=60))
+                                except Exception:
+                                    story.append(Paragraph("[Error cargando firma]", style_normal))
+                            else:
+                                story.append(Paragraph("Sin firma", style_normal))
                                 
-                            sig_data.append([img_tec_flow, img_cli_flow])
-                            t_sig = Table(sig_data, colWidths=[250, 250])
-                            t_sig.setStyle(TableStyle([
-                                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                                ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
-                                ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-                            ]))
-                            story.append(t_sig)
-                            
                             doc.build(story)
                             buffer.seek(0)
                             
                             st.download_button(
-                                label=f"📥 Descargar PDF Albarán #{alb['id']}",
+                                label=f"🖨️ Descargar Ticket Térmico #{alb['id']}",
                                 data=buffer,
-                                file_name=f"Albaran_{alb['id']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
+                                file_name=f"Ticket_{alb['id']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
                                 mime="application/pdf",
                                 key=f"dl_btn_{alb['id']}"
                             )
 
                     with col_del:
-                        # Botón para borrar del histórico
                         if st.button(f"🗑️ Borrar #{alb['id']}", key=f"del_db_{alb['id']}"):
                             supabase.table("equipos_instalados").delete().eq("albaranes_id", alb['id']).execute()
                             supabase.table("albaranes_instalaciones").delete().eq("id", alb['id']).execute()
