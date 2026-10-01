@@ -107,16 +107,17 @@ if menu == "Nuevo Albarán":
     if 'reset_tec' not in st.session_state: st.session_state.reset_tec = 0
     if 'reset_cli' not in st.session_state: st.session_state.reset_cli = 0
 
+    st.text(f"Firma Técnico: {nombre_tecnico}")
     col_t, col_btn_t = st.columns([3, 1])
     with col_t:
-        st.text(f"Firma Técnico ({nombre_tecnico})")
+        # Lienzo más grande y cómodo para el móvil
         canvas_tecnico = st_canvas(
             fill_color="rgba(255, 255, 255, 1)",
-            stroke_width=2.5,
+            stroke_width=3,
             stroke_color="#000000",
             background_color="#FFFFFF",
-            height=110,
-            width=200,
+            height=160,
+            width=280,
             drawing_mode="freedraw",
             key=f"canvas_tec_{st.session_state.reset_tec}"
         )
@@ -130,16 +131,17 @@ if menu == "Nuevo Albarán":
     st.markdown("")
     nombre_firmante_cliente = st.text_input("Nombre y Cargo de quien firma (Ej: Juan - Camarero / Encargado)")
     
+    st.text(f"Firma Cliente / Receptor: {nombre_firmante_cliente if nombre_firmante_cliente else 'Titular'}")
     col_c, col_btn_c = st.columns([3, 1])
     with col_c:
-        st.text("Firma Cliente / Receptor")
+        # Lienzo más grande y cómodo para el cliente
         canvas_cliente = st_canvas(
             fill_color="rgba(255, 255, 255, 1)",
-            stroke_width=2.5,
+            stroke_width=3,
             stroke_color="#000000",
             background_color="#FFFFFF",
-            height=110,
-            width=200,
+            height=160,
+            width=280,
             drawing_mode="freedraw",
             key=f"canvas_cli_{st.session_state.reset_cli}"
         )
@@ -163,17 +165,17 @@ if menu == "Nuevo Albarán":
                 if canvas_tecnico.image_data is not None:
                     arr = canvas_tecnico.image_data
                     if isinstance(arr, np.ndarray) and arr.size > 0:
-                        # Convertir asegurando formato RGB/RGBA limpio
-                        img_tec = PILImage.fromarray(arr.astype('uint8'))
-                        # Si tiene canal alpha transparente, poner fondo blanco
-                        if img_tec.mode in ('RGBA', 'LA'):
-                            background = PILImage.new("RGB", img_tec.size, (255, 255, 255))
-                            background.paste(img_tec, mask=img_tec.split()[3])
-                            img_tec = background
-                        
-                        buffered_tec = io.BytesIO()
-                        img_tec.save(buffered_tec, format="PNG")
-                        sig_tec_b64 = base64.b64encode(buffered_tec.getvalue()).decode()
+                        # Comprobar que no esté completamente en blanco (todo 255)
+                        if not np.all(arr == 255):
+                            img_tec = PILImage.fromarray(arr.astype('uint8'))
+                            if img_tec.mode in ('RGBA', 'LA'):
+                                background = PILImage.new("RGB", img_tec.size, (255, 255, 255))
+                                background.paste(img_tec, mask=img_tec.split()[3])
+                                img_tec = background
+                            
+                            buffered_tec = io.BytesIO()
+                            img_tec.save(buffered_tec, format="PNG")
+                            sig_tec_b64 = base64.b64encode(buffered_tec.getvalue()).decode()
             except Exception as e:
                 print(f"Error firma técnico: {e}")
 
@@ -183,15 +185,16 @@ if menu == "Nuevo Albarán":
                 if canvas_cliente.image_data is not None:
                     arr_c = canvas_cliente.image_data
                     if isinstance(arr_c, np.ndarray) and arr_c.size > 0:
-                        img_cli = PILImage.fromarray(arr_c.astype('uint8'))
-                        if img_cli.mode in ('RGBA', 'LA'):
-                            background = PILImage.new("RGB", img_cli.size, (255, 255, 255))
-                            background.paste(img_cli, mask=img_cli.split()[3])
-                            img_cli = background
+                        if not np.all(arr_c == 255):
+                            img_cli = PILImage.fromarray(arr_c.astype('uint8'))
+                            if img_cli.mode in ('RGBA', 'LA'):
+                                background = PILImage.new("RGB", img_cli.size, (255, 255, 255))
+                                background.paste(img_cli, mask=img_cli.split()[3])
+                                img_cli = background
 
-                        buffered_cli = io.BytesIO()
-                        img_cli.save(buffered_cli, format="PNG")
-                        sig_cli_b64 = base64.b64encode(buffered_cli.getvalue()).decode()
+                            buffered_cli = io.BytesIO()
+                            img_cli.save(buffered_cli, format="PNG")
+                            sig_cli_b64 = base64.b64encode(buffered_cli.getvalue()).decode()
             except Exception as e:
                 print(f"Error firma cliente: {e}")
 
@@ -272,7 +275,7 @@ elif menu == "Histórico / Reimprimir":
                             style_normal = ParagraphStyle('NormalTicket', parent=styles['Normal'], fontSize=7, leading=9)
                             style_title = ParagraphStyle('TitleTicket', parent=styles['Normal'], alignment=1, fontSize=9, leading=11, fontName='Helvetica-Bold')
                             
-                            # Añadir logo en el PDF si existe localmente en el servidor
+                            # Añadir logo en el PDF
                             if os.path.exists("logo.png"):
                                 try:
                                     story.append(RLImage("logo.png", width=100, height=35))
@@ -308,12 +311,12 @@ elif menu == "Histórico / Reimprimir":
                             story.append(Paragraph("<i>La(s) máquina(s) son propiedad de Cafés Atalaya, en régimen de cesión exclusiva.</i>", style_center))
                             story.append(Spacer(1, 8))
                             
-                            # Incrustar Firma Técnico
-                            story.append(Paragraph("<b>FIRMA TÉCNICO:</b>", style_bold))
+                            # Firma Técnico con su nombre
+                            story.append(Paragraph(f"<b>FIRMA TÉCNICO ({alb['tecnico']}):</b>", style_bold))
                             if alb.get('firma_tecnico'):
                                 try:
                                     img_t_bytes = base64.b64decode(alb['firma_tecnico'])
-                                    story.append(RLImage(io.BytesIO(img_t_bytes), width=150, height=55))
+                                    story.append(RLImage(io.BytesIO(img_t_bytes), width=160, height=65))
                                 except Exception:
                                     story.append(Paragraph("[Sin firma válida]", style_normal))
                             else:
@@ -321,12 +324,12 @@ elif menu == "Histórico / Reimprimir":
                                 
                             story.append(Spacer(1, 6))
                             
-                            # Incrustar Firma Cliente
+                            # Firma Cliente
                             story.append(Paragraph("<b>FIRMA CLIENTE:</b>", style_bold))
                             if alb.get('firma_cliente'):
                                 try:
                                     img_c_bytes = base64.b64decode(alb['firma_cliente'])
-                                    story.append(RLImage(io.BytesIO(img_c_bytes), width=150, height=55))
+                                    story.append(RLImage(io.BytesIO(img_c_bytes), width=160, height=65))
                                 except Exception:
                                     story.append(Paragraph("[Sin firma válida]", style_normal))
                             else:
