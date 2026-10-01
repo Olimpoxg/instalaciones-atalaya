@@ -228,6 +228,7 @@ if menu == "Nuevo Albarán":
         height=160,
         width=280,
         drawing_mode="freedraw",
+        return_image_data=True,
         key=f"canvas_tec_{st.session_state.reset_tec}",
     )
     if st.button("Borrar firma técnico", key="clr_tec"):
@@ -247,6 +248,7 @@ if menu == "Nuevo Albarán":
         height=160,
         width=280,
         drawing_mode="freedraw",
+        return_image_data=True,
         key=f"canvas_cli_{st.session_state.reset_cli}",
     )
     if st.button("Borrar firma cliente", key="clr_cli"):
