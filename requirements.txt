@@ -1,0 +1,5 @@
+streamlit
+reportlab
+streamlit-drawable-canvas
+supabase
+pillow
