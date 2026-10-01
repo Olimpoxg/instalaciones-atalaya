@@ -90,7 +90,7 @@ def generar_pdf(alb, equipos):
     story.append(Spacer(1, 4))
     story.append(Paragraph(f"<b>ALBARÁN #{alb['id']} - {alb['tipo_intervencion'].upper()}</b>", style_center))
     
-    # Mostrar fecha adaptada a hora local de España si viene de BD
+    # Mostrar fecha adaptada a hora local de España
     fecha_str = alb['fecha']
     try:
         dt_utc = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
@@ -171,14 +171,8 @@ if menu == "Nuevo Albarán":
         cp = st.text_input("Código Postal", value="31001")
 
     st.markdown("---")
-    st.subheader("2. Tipo de Intervención")
-    tipo_intervencion = st.selectbox(
-        "Selecciona la operación principal",
-        ["Instalación", "Retirada", "Sustitución"],
-    )
-
-    st.markdown("---")
-    st.subheader("3. Equipos Afectados")
+    st.subheader("2. Equipos Afectados")
+    st.info("Añade las máquinas que intervienen. El tipo de albarán (Instalación, Retirada o Sustitución) se calculará solo.")
 
     if "equipos_temp" not in st.session_state:
         st.session_state.equipos_temp = []
@@ -215,12 +209,12 @@ if menu == "Nuevo Albarán":
                     st.rerun()
 
     st.markdown("---")
-    st.subheader("4. Observaciones y Técnico")
+    st.subheader("3. Observaciones y Técnico")
     observaciones = st.text_area("Notas adicionales", placeholder="Ej: Máquina revisada, pendiente cambio de filtro...")
     nombre_tecnico = st.text_input("Nombre del Técnico", value="Mikel")
 
     st.markdown("---")
-    st.subheader("5. Datos del Firmante y Firmas Digitales")
+    st.subheader("4. Datos del Firmante y Firmas Digitales")
     
     col_f1, col_f2 = st.columns(2)
     with col_f1:
@@ -293,10 +287,22 @@ if menu == "Nuevo Albarán":
         elif not sig_cli_b64:
             st.error("No se ha detectado la firma del cliente.")
         else:
-            # Obtener fecha y hora actual exacta en la España peninsular (Madrid)
+            # --- CÁLCULO AUTOMÁTICO DEL TIPO DE INTERVENCIÓN ---
+            acciones = [eq["accion"] for eq in st.session_state.equipos_temp]
+            tiene_instalado = "Instalado" in acciones
+            tiene_retirado = "Retirado" in acciones
+
+            if tiene_instalado and tiene_retirado:
+                tipo_intervencion = "Sustitución"
+            elif tiene_instalado:
+                tipo_intervencion = "Instalación"
+            else:
+                tipo_intervencion = "Retirada"
+            # --------------------------------------------------
+
+            # Obtener fecha y hora actual en Madrid
             ahora_madrid = datetime.now(ZoneInfo("Europe/Madrid")).isoformat()
 
-            # Construir la cadena descriptiva del titular con el firmante y el DNI si lo hay
             info_firmante = nombre_firmante_cliente if nombre_firmante_cliente else "Titular"
             if dni_firmante_cliente:
                 info_firmante += f" (DNI: {dni_firmante_cliente})"
@@ -335,7 +341,7 @@ if menu == "Nuevo Albarán":
                         "num_serie": eq["serie"],
                     }).execute()
 
-                st.success(f"¡Albarán #{albaran_id} guardado con éxito con sus firmas y hora peninsular!")
+                st.success(f"¡Albarán #{albaran_id} guardado como '{tipo_intervencion}' con éxito!")
                 st.session_state.equipos_temp = []
                 st.session_state.reset_tec += 1
                 st.session_state.reset_cli += 1
@@ -381,7 +387,7 @@ elif menu == "Histórico / Reimprimir":
 
                         if pdf_key in st.session_state:
                             st.download_button(
-                                label=f"⬇️️ Descargar Ticket #{alb['id']}",
+                                label=f"⬇ Descargar Ticket #{alb['id']}",
                                 data=st.session_state[pdf_key],
                                 file_name=f"Ticket_{alb['id']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
                                 mime="application/pdf",
