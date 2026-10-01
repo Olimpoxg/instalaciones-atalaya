@@ -18,6 +18,47 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ==========================================
+# SISTEMA DE AUTENTICACIÓN POR CONTRASEÑA
+# ==========================================
+def verificar_password():
+    """Devuelve True si el usuario ha introducido la clave correcta."""
+    if "autenticado" not in st.session_state:
+        st.session_state.autenticado = False
+
+    if st.session_state.autenticado:
+        return True
+
+    # Comprobar si la clave está configurada en los secrets
+    if "APP_PASSWORD" not in st.secrets:
+        st.error("⚠️ Falta configurar 'APP_PASSWORD' en los Secrets de Streamlit Cloud.")
+        return False
+
+    # Pantalla de login
+    if os.path.exists("logo.png"):
+        try:
+            st.image("logo.png", width=180)
+        except Exception:
+            pass
+            
+    st.title("☕ Acceso Restringido")
+    st.subheader("Cafés Atalaya / Control de Intervenciones")
+    
+    password_ingresada = st.text_input("Introduce la contraseña de acceso", type="password")
+    
+    if st.button("Entrar", type="primary"):
+        if password_ingresada == st.secrets["APP_PASSWORD"]:
+            st.session_state.autenticado = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+    return False
+
+# Si no está autenticado, paramos la ejecución aquí
+if not verificar_password():
+    st.stop()
+# ==========================================
+
 # Evita que la página haga scroll mientras se dibuja con el dedo
 st.markdown(
     """
@@ -139,7 +180,7 @@ def generar_pdf(alb, equipos):
         story.append(Paragraph("Sin firma", style_normal))
     story.append(Spacer(1, 10))
 
-    # --- FIRMA CLIENTE (Estilo unificado con el técnico) ---
+    # --- FIRMA CLIENTE ---
     nombre_f = alb.get('firmante_nombre', 'Titular')
     dni_f = alb.get('firmante_dni', '')
     
@@ -415,7 +456,7 @@ elif menu == "Histórico / Reimprimir":
                             )
 
                     with col_del:
-                        if st.button(f"🗑️ Borrar #{alb['id']}", key=f"del_db_{alb['id']}"):
+                        if st.button(f"🗑️️ Borrar #{alb['id']}", key=f"del_db_{alb['id']}"):
                             supabase.table("equipos_instalados").delete().eq("albaranes_id", alb["id"]).execute()
                             supabase.table("albaranes_instalaciones").delete().eq("id", alb["id"]).execute()
                             st.session_state.pop(pdf_key, None)
