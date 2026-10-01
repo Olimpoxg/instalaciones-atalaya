@@ -73,70 +73,88 @@ def generar_pdf(alb, equipos):
     story = []
 
     styles = getSampleStyleSheet()
-    style_center = ParagraphStyle("Center", parent=styles["Normal"], alignment=1, fontSize=8, leading=10)
-    style_bold = ParagraphStyle("Bold", parent=styles["Normal"], fontSize=7, leading=9, fontName="Helvetica-Bold")
-    style_normal = ParagraphStyle("NormalTicket", parent=styles["Normal"], fontSize=7, leading=9)
-    style_title = ParagraphStyle("TitleTicket", parent=styles["Normal"], alignment=1, fontSize=9, leading=11, fontName="Helvetica-Bold")
+    # Tipografías y tamaños ligeramente aumentados para mejor lectura térmica
+    style_center = ParagraphStyle("Center", parent=styles["Normal"], alignment=1, fontSize=9, leading=12)
+    style_bold = ParagraphStyle("Bold", parent=styles["Normal"], fontSize=8, leading=11, fontName="Helvetica-Bold")
+    style_normal = ParagraphStyle("NormalTicket", parent=styles["Normal"], fontSize=8, leading=11)
+    style_title = ParagraphStyle("TitleTicket", parent=styles["Normal"], alignment=1, fontSize=10, leading=13, fontName="Helvetica-Bold")
+    style_header_tipo = ParagraphStyle("HeaderTipo", parent=styles["Normal"], alignment=1, fontSize=11, leading=14, fontName="Helvetica-Bold")
 
     if os.path.exists("logo.png"):
         try:
-            story.append(RLImage("logo.png", width=100, height=35))
-            story.append(Spacer(1, 4))
+            story.append(RLImage("logo.png", width=110, height=40))
+            story.append(Spacer(1, 6))
         except Exception:
             pass
 
     story.append(Paragraph("<b>SERVICIOS DE RECREATIVOS Y CAFÉ, S.L.</b>", style_title))
     story.append(Paragraph("<b>CAFÉS ATALAYA</b>", style_title))
-    story.append(Spacer(1, 4))
-    story.append(Paragraph(f"<b>ALBARÁN #{alb['id']} - {alb['tipo_intervencion'].upper()}</b>", style_center))
+    story.append(Spacer(1, 6))
     
-    # Mostrar fecha adaptada a hora local de España
+    # Título limpio sin número de albarán
+    story.append(Paragraph(f"<b>{alb['tipo_intervencion'].upper()}</b>", style_header_tipo))
+    story.append(Spacer(1, 4))
+    
+    # Formato de fecha español (DD/MM/YYYY HH:MM)
     fecha_str = alb['fecha']
     try:
         dt_utc = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
         dt_es = dt_utc.astimezone(ZoneInfo("Europe/Madrid"))
-        fecha_fmt = dt_es.strftime("%Y-%m-%d %H:%M")
+        fecha_fmt = dt_es.strftime("%d/%m/%Y %H:%M")
     except Exception:
         fecha_fmt = fecha_str[:16]
 
     story.append(Paragraph(f"Fecha: {fecha_fmt} | Tec: {alb['tecnico']}", style_center))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
     story.append(Paragraph(f"<b>Local:</b> {alb['nombre_local']}", style_bold))
     story.append(Paragraph(f"<b>Titular:</b> {alb['titular']}", style_normal))
     story.append(Paragraph(f"<b>Dir:</b> {alb['direccion']}, {alb['localidad']}", style_normal))
     story.append(Paragraph(f"<b>Tel:</b> {alb['telefono']}", style_normal))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
 
     story.append(Paragraph("<b>EQUIPOS AFECTADOS:</b>", style_bold))
     for e in equipos:
         story.append(Paragraph(f"• <b>{e['accion']}</b>: {e['tipo_equipo']}", style_bold))
         story.append(Paragraph(f"  {e['fabricante']} {e['modelo']}", style_normal))
         story.append(Paragraph(f"  N/S: <b>{e['num_serie']}</b>", style_normal))
-        story.append(Spacer(1, 2))
+        story.append(Spacer(1, 4))
 
     if alb.get("observaciones"):
-        story.append(Spacer(1, 4))
+        story.append(Spacer(1, 6))
         story.append(Paragraph(f"<b>Obs:</b> {alb['observaciones']}", style_normal))
 
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
     story.append(Paragraph("<i>La(s) máquina(s) son propiedad de Cafés Atalaya, en régimen de cesión exclusiva.</i>", style_center))
+    story.append(Spacer(1, 10))
+
+    # --- FIRMA TÉCNICO ---
+    story.append(Paragraph(f"<b>FIRMA TÉCNICO ({alb['tecnico']}):</b>", style_bold))
+    if alb.get("firma_tecnico"):
+        try:
+            img_bytes = base64.b64decode(alb["firma_tecnico"])
+            story.append(RLImage(io.BytesIO(img_bytes), width=160, height=91))
+        except Exception:
+            story.append(Paragraph("[Sin firma válida]", style_normal))
+    else:
+        story.append(Paragraph("Sin firma", style_normal))
     story.append(Spacer(1, 8))
 
-    for titulo, campo in [
-        (f"FIRMA TÉCNICO ({alb['tecnico']}):", "firma_tecnico"),
-        ("FIRMA CLIENTE:", "firma_cliente"),
-    ]:
-        story.append(Paragraph(f"<b>{titulo}</b>", style_bold))
-        if alb.get(campo):
-            try:
-                img_bytes = base64.b64decode(alb[campo])
-                story.append(RLImage(io.BytesIO(img_bytes), width=160, height=91))
-            except Exception:
-                story.append(Paragraph("[Sin firma válida]", style_normal))
-        else:
-            story.append(Paragraph("Sin firma", style_normal))
-        story.append(Spacer(1, 6))
+    # --- FIRMA CLIENTE (Con nombre y DNI integrado al lado) ---
+    firmante_info = alb.get("firmante_nombre", "Cliente")
+    if alb.get("firmante_dni"):
+        firmante_info += f" (DNI: {alb['firmante_dni']})"
+
+    story.append(Paragraph(f"<b>FIRMA CLIENTE ({firmante_info}):</b>", style_bold))
+    if alb.get("firma_cliente"):
+        try:
+            img_bytes = base64.b64decode(alb["firma_cliente"])
+            story.append(RLImage(io.BytesIO(img_bytes), width=160, height=91))
+        except Exception:
+            story.append(Paragraph("[Sin firma válida]", style_normal))
+    else:
+        story.append(Paragraph("Sin firma", style_normal))
+    story.append(Spacer(1, 6))
 
     doc.build(story)
     buffer.seek(0)
@@ -172,7 +190,7 @@ if menu == "Nuevo Albarán":
 
     st.markdown("---")
     st.subheader("2. Equipos Afectados")
-    st.info("Añade las máquinas que intervienen. El tipo de albarán (Instalación, Retirada o Sustitución) se calculará solo.")
+    st.info("Añade las máquinas que intervienen. El tipo de albarán se calculará solo.")
 
     if "equipos_temp" not in st.session_state:
         st.session_state.equipos_temp = []
@@ -300,12 +318,7 @@ if menu == "Nuevo Albarán":
                 tipo_intervencion = "Retirada"
             # --------------------------------------------------
 
-            # Obtener fecha y hora actual en Madrid
             ahora_madrid = datetime.now(ZoneInfo("Europe/Madrid")).isoformat()
-
-            info_firmante = nombre_firmante_cliente if nombre_firmante_cliente else "Titular"
-            if dni_firmante_cliente:
-                info_firmante += f" (DNI: {dni_firmante_cliente})"
 
             albaran_data = {
                 "fecha": ahora_madrid,
@@ -316,7 +329,9 @@ if menu == "Nuevo Albarán":
                 "localidad": localidad,
                 "cp": cp,
                 "telefono": telefono,
-                "titular": f"{titular} | Firmante: {info_firmante}",
+                "titular": titular,
+                "firmante_nombre": nombre_firmante_cliente if nombre_firmante_cliente else "Titular",
+                "firmante_dni": dni_firmante_cliente,
                 "observaciones": observaciones,
                 "tecnico": nombre_tecnico,
                 "firma_tecnico": sig_tec_b64,
@@ -341,7 +356,7 @@ if menu == "Nuevo Albarán":
                         "num_serie": eq["serie"],
                     }).execute()
 
-                st.success(f"¡Albarán #{albaran_id} guardado como '{tipo_intervencion}' con éxito!")
+                st.success(f"¡Albarán guardado como '{tipo_intervencion}' con éxito!")
                 st.session_state.equipos_temp = []
                 st.session_state.reset_tec += 1
                 st.session_state.reset_cli += 1
@@ -364,9 +379,13 @@ elif menu == "Histórico / Reimprimir":
             st.info("No hay albaranes registrados todavía.")
         else:
             for alb in albaranes:
-                with st.expander(f"Albarán #{alb['id']} - {alb['nombre_local']} ({alb['tipo_intervencion']} - {alb['fecha'][:10]})"):
-                    st.write(f"**Titular / Firmante:** {alb['titular']} | **Tel:** {alb['telefono']}")
-                    st.write(f"**Dirección:** {alb['direccion']}, {alb['localidad']}")
+                firmante_txt = alb.get('firmante_nombre', 'Titular')
+                if alb.get('firmante_dni'):
+                    firmante_txt += f" (DNI: {alb['firmante_dni']})"
+
+                with st.expander(f"{alb['tipo_intervencion'].upper()} - {alb['nombre_local']} ({alb['fecha'][:10]})"):
+                    st.write(f"**Titular:** {alb['titular']} | **Firmante:** {firmante_txt}")
+                    st.write(f"**Tel:** {alb['telefono']} | **Dir:** {alb['direccion']}, {alb['localidad']}")
                     st.write(f"**Técnico:** {alb['tecnico']}")
 
                     eq_res = supabase.table("equipos_instalados").select("*").eq("albaranes_id", alb["id"]).execute()
@@ -389,7 +408,7 @@ elif menu == "Histórico / Reimprimir":
                             st.download_button(
                                 label=f"⬇ Descargar Ticket #{alb['id']}",
                                 data=st.session_state[pdf_key],
-                                file_name=f"Ticket_{alb['id']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
+                                file_name=f"Ticket_{alb['tipo_intervencion']}_{alb['nombre_local'].replace(' ', '_')}.pdf",
                                 mime="application/pdf",
                                 key=f"dl_btn_{alb['id']}",
                             )
@@ -399,7 +418,7 @@ elif menu == "Histórico / Reimprimir":
                             supabase.table("equipos_instalados").delete().eq("albaranes_id", alb["id"]).execute()
                             supabase.table("albaranes_instalaciones").delete().eq("id", alb["id"]).execute()
                             st.session_state.pop(pdf_key, None)
-                            st.success(f"Albarán #{alb['id']} borrado.")
+                            st.success("Albarán borrado.")
                             st.rerun()
 
     except Exception as e:
